@@ -1,278 +1,295 @@
 # Battery：Apple Silicon MacBook 充电控制增强版
 
-> 专注于稳定限充、重启恢复和合盖睡眠保护的 macOS 命令行工具。
+> 为 MacBook 设置明确的充电上限，并在重启、重新登录和合盖睡眠后继续生效。
 
 [English backup](README.en.md) · [上游项目](https://github.com/actuallymentor/battery) · [本仓库](https://github.com/tianwuziyan/battery)
 
 > [!IMPORTANT]
-> 本仓库是在 [actuallymentor/battery](https://github.com/actuallymentor/battery) 基础上继续完善和修改的维护增强分支，并非上游官方版本。当前改进重点是解决新版 macOS 与 Apple Silicon 设备上出现的限充失效、重启后维护任务未恢复、重复后台进程、SMC 写入假成功，以及合盖睡眠期间继续充到 100% 等问题。
+> 本仓库基于 [actuallymentor/battery](https://github.com/actuallymentor/battery) 继续维护，并非上游官方版本。主要改进集中在新版 macOS 兼容、后台任务恢复、SMC 写入验证和合盖睡眠保护，不以增加额外功能为目标。
 
 ## 项目简介
 
-长期连接电源时，把电池维持在较低电量通常比长期保持 100% 更有利于电池寿命。macOS 自带的“优化电池充电”会根据使用习惯自动判断，但不能保证始终停在用户指定的百分比。
+macOS 自带的“优化电池充电”会根据使用习惯决定何时暂停充电，但不能保证始终停在指定百分比。Battery 提供了一套命令行控制方式，例如执行 `battery maintain 75` 后，电量达到 75% 时停止充电，低于 75% 时重新允许充电。
 
-Battery 允许你直接执行 `battery maintain 75`，让 MacBook 在达到 75% 后停止充电，并在电量下降后恢复充电。本增强分支保留上游的核心命令行能力，同时强化新版 macOS 的 SMC 兼容、launchd 后台任务管理和合盖睡眠保护。项目目前以“可靠控制充电”为主要目标，不追求额外的电池分析或复杂界面功能。
+这个维护分支重点解决原版在新版 macOS 上遇到的几个实际问题：限充命令看似成功但没有生效、重启后维护任务消失、重复后台进程，以及 Mac 合盖睡眠后继续充到 100%。
 
-## 本分支的主要改进
+## 本分支的改进
 
-| 改进 | 解决的问题 | 当前行为 |
-|---|---|---|
-| 新版 SMC 能力检测 | 新系统继续写入旧 SMC 键，命令看似成功但实际未生效 | 自动识别可用充电控制键，并在写入后回读确认 |
-| 重启后自动恢复 | 重新登录后限充进程消失 | 通过用户级 launchd 任务恢复已保存的维护策略 |
-| 单实例后台维护 | 多次执行命令后出现重复维护进程 | 注册前清理旧进程并确认 launchd 运行状态 |
-| 合盖睡眠保护 | 合盖后系统睡眠，电池仍可能继续充到 100% | 入睡前暂停充电，唤醒后恢复原来的 `maintain` 策略 |
-| 安装与更新固定到本 fork | 更新后又被上游旧脚本覆盖 | `setup.sh`、`update.sh` 和 CLI 更新均从本仓库获取 |
-| 安全安装与兼容路径 | 权限、旧路径和 GUI 兼容问题 | 核心文件由 root 持有，并保留 `/usr/local/bin` 兼容链接 |
+| 改进 | 作用 |
+|---|---|
+| 新版 SMC 能力检测 | 根据当前 Mac 支持的控制键选择正确写法，兼容新版 macOS |
+| 写入后回读验证 | 不只检查命令返回值，还会确认底层充电状态确实改变 |
+| launchd 后台恢复 | 重新登录或重启后，自动恢复保存的充电上限 |
+| 单实例维护 | 新设置启动前先停止旧任务，避免多个维护进程同时运行 |
+| 合盖睡眠保护 | 睡眠前暂停充电，唤醒后恢复原来的限充设置 |
+| fork 独立更新 | 安装和更新均从本仓库获取，不会被上游旧脚本覆盖 |
 
 ## 适用环境
 
-- Apple Silicon Mac（M1、M2、M3、M4 等）
-- macOS；不支持 Intel Mac
-- 使用合盖保护时，需要安装仓库自带的 `dist/battery-sleep` 原生辅助程序
-- 安装时需要管理员密码；日常执行限充命令不需要反复输入密码
+- Apple Silicon Mac（M1、M2、M3、M4 等）；
+- 不支持 Intel Mac；
+- 合盖保护程序当前要求 macOS 13 或更高版本；
+- 安装时需要管理员密码，日常执行限充命令通常不需要再次输入。
 
-> 原生合盖辅助程序当前以 macOS 13 为最低部署目标。Apple 的 SMC 接口并非公开稳定 API，系统升级后仍可能需要继续适配。
+Apple 没有公开保证这些 SMC 控制方式长期不变，因此 macOS 大版本更新后仍可能需要重新适配。
 
 ## 安装
 
-### 方式一：让 AI 编码工具协助安装
-
-可以在 VS Code 中把下面这段话交给 Codex 或其他能操作终端的编码助手：
-
-```text
-请从 https://github.com/tianwuziyan/battery 安装 Battery CLI。
-先检查仓库中的 README.md 和 setup.sh，再执行官方安装脚本；
-安装后验证 battery --version、battery status 和 battery sleep status，
-不要删除我其他项目或修改无关的系统配置。
-```
-
-安装过程需要输入 macOS 管理员密码时，仍需由你本人完成。
-
-### 方式二：一行命令安装（推荐）
+在终端执行：
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/tianwuziyan/battery/main/setup.sh | bash
 ```
 
-安装脚本会：
+安装脚本会把 `battery`、`smc` 和合盖辅助程序安装到 `/usr/local/co.palokaj.battery`，同时创建命令行兼容链接并配置必要权限。
 
-1. 从本仓库 `main` 分支下载最新版；
-2. 将 `battery`、`smc` 和 `battery-sleep` 安装到 `/usr/local/co.palokaj.battery`；
-3. 创建 `/usr/local/bin/battery` 与 `/usr/local/bin/smc` 兼容链接；
-4. 写入受限的 sudoers 规则；
-5. 恢复已经保存的限充和合盖保护设置。
+如果终端出现 `Password:`，请输入当前 Mac 用户的管理员密码并按回车。输入过程中不显示字符属于正常现象。
 
-### 方式三：克隆后安装
-
-```bash
-git clone https://github.com/tianwuziyan/battery.git
-cd battery
-bash setup.sh
-```
-
-安装完成后，新开一个终端并验证：
+安装完成后，重新打开终端并检查：
 
 ```bash
 battery --version
 battery status
-battery sleep status
+```
+
+已经下载本仓库的用户，也可以在仓库目录执行：
+
+```bash
+bash setup.sh
 ```
 
 ## 快速开始
 
-只需要限制充电并防止合盖后充满，可以执行：
+### 固定在一个百分比
 
 ```bash
-# 把电量维持在 75%
 battery maintain 75
+```
 
-# 开启合盖睡眠保护（只需开启一次）
+- 电量低于 75%：允许充电；
+- 电量达到 75%：停止充电；
+- 设置会保存，重启后自动恢复。
+
+### 维持在一个范围
+
+```bash
+battery maintain 70-80
+```
+
+- 电量达到 80%：停止充电；
+- 电量低于 70%：重新允许充电；
+- 电量处于 70%～80%：保持当前充电状态，减少频繁切换。
+
+范围模式的下限不得低于 10%，上限不得超过 100%，且下限必须小于上限。
+
+### 防止合盖后继续充电
+
+```bash
 battery sleep on
-
-# 查看当前状态
-battery status
-battery sleep status
 ```
 
-设置会保存在 `~/.battery`，重新登录或重启后由 launchd 自动恢复。
+开启后，Mac 准备睡眠时会先暂停充电，唤醒后再恢复之前保存的 `maintain` 设置。此开关只需设置一次，重启后仍然保留。
 
-## 常用命令
+日常长期插电可以使用：
 
-| 命令 | 作用 |
+```bash
+battery maintain 70-80
+battery sleep on
+```
+
+如果希望电量更接近固定值，则使用 `battery maintain 75`。
+
+## 命令说明
+
+### 限充与状态
+
+| 命令 | 含义与实际效果 |
 |---|---|
-| `battery maintain 75` | 把充电上限设为 75% |
-| `battery maintain 70-80` | 在 70% 到 80% 之间维护电量 |
-| `battery maintain stop` | 停止自动限充并恢复正常充电 |
-| `battery sleep on` | 开启合盖睡眠保护 |
-| `battery sleep off` | 关闭合盖睡眠保护 |
-| `battery sleep status` | 查看合盖保护是否运行 |
-| `battery status` | 查看电量、供电和 SMC 充电状态 |
-| `battery logs 100` | 查看最近 100 行日志 |
-| `battery charging off` | 手动停止充电，同时停止自动维护 |
-| `battery charging on` | 手动恢复充电，同时停止自动维护 |
-| `battery update` | 从本 fork 的 `main` 分支更新 |
-| `battery reinstall` | 重新运行完整安装流程 |
-| `battery uninstall` | 恢复充电并卸载 Battery |
+| `battery maintain 75` | 设置固定上限。达到 75% 停止充电，低于 75% 重新允许充电 |
+| `battery maintain 70-80` | 设置维护范围。达到 80% 停止充电，低于 70% 重新允许充电 |
+| `battery maintain 80 --force-discharge` | 如果当前电量高于 80%，先在插电状态下主动放电到 80%，再开始限充 |
+| `battery maintain 70-80 --force-discharge` | 先主动放电到范围下限 70%，再执行 70%～80% 维护 |
+| `battery maintain stop` | 停止自动限充任务，并恢复正常充电；不会卸载程序 |
+| `battery status` | 显示当前电量、剩余时间、SMC 充电状态和正在执行的维护设置 |
+| `battery logs 100` | 显示最近 100 行 CLI、GUI 日志和配置状态；数字可以自行调整 |
 
-运行 `battery` 或 `battery help` 可以查看完整命令说明。上游保留的电压维护、校准、单次充电和主动放电等高级命令仍然存在，但不是本分支当前的维护重点。
+`--force-discharge` 会增加电池循环消耗，也不适合合盖模式。普通限充不需要添加这个选项。
 
-## 合盖睡眠保护是怎样工作的
+### 合盖睡眠保护
 
-`battery maintain 75` 负责电脑正常运行时的限充；`battery sleep on` 是额外的睡眠保险。两个命令属于同一个 `battery` 工具，不需要单独安装第二个程序。
-
-```mermaid
-flowchart LR
-    A["执行 battery sleep on"] --> B["注册睡眠监听任务"]
-    B --> C["macOS 准备睡眠"]
-    C --> D["立即停止充电并回读确认"]
-    D --> E["Mac 合盖睡眠"]
-    E --> F["Mac 唤醒"]
-    F --> G["恢复已保存的 maintain 策略"]
-```
-
-- 开启后，原生辅助程序只监听系统睡眠与唤醒事件。
-- 收到即将睡眠事件时，Battery 会先停止充电；确认失败则记录错误，不会假装已经生效。
-- 唤醒后重新读取原来的百分比设置：低于目标时允许充电，达到目标时继续停止充电。
-- 该功能默认关闭，使用 `battery sleep on` 开启一次即可持久保留。
-
-> [!NOTE]
-> 睡眠保护的设计目标是“合盖期间不要继续充电”。因此即使合盖时电量低于 75%，开启该功能后，睡眠期间也会暂停充电，唤醒后才恢复原策略。目前它只配合百分比 `maintain` 策略，不处理电压维护模式。
-
-## 系统架构
-
-```mermaid
-flowchart TD
-    U["用户：battery 命令"] --> CLI["battery.sh：命令与策略入口"]
-    CLI --> CFG["~/.battery：设置与日志"]
-    CLI --> MAINTAIN["launchd：常驻限充任务"]
-    CLI --> SLEEP["launchd：睡眠监听任务"]
-    SLEEP --> HELPER["battery-sleep：IOKit 原生辅助程序"]
-    MAINTAIN --> SMC["smc：读取与写入充电控制键"]
-    HELPER --> CLI
-    CLI --> SMC
-    SMC --> HW["Apple Silicon 电源管理硬件"]
-```
-
-| 模块 | 职责 |
+| 命令 | 含义与实际效果 |
 |---|---|
-| `battery.sh` | CLI 入口、限充策略、SMC 能力检测、写入回读与 launchd 管理 |
-| `dist/smc` | 读取和写入 Apple Silicon 的 SMC 键 |
-| `src/battery-sleep.c` | 使用 IOKit 监听睡眠/唤醒事件 |
-| `dist/battery-sleep` | 安装时使用的预编译合盖辅助程序 |
-| launchd 任务 | 在登录、重启和唤醒后维持后台策略 |
-| `~/.battery` | 保存目标电量、开关状态和运行日志 |
+| `battery sleep on` | 开启睡眠保护；入睡前暂停充电，唤醒后恢复当前 `maintain` 设置 |
+| `battery sleep off` | 关闭睡眠保护；不会删除或停止现有 `maintain` 设置 |
+| `battery sleep status` | 显示睡眠保护当前是 `on` 还是 `off` |
 
-## 工作流程
+睡眠保护的目标是避免合盖期间继续充电。因此即使合盖时电量低于上限，睡眠期间也会暂停充电，唤醒后才恢复原来的维护策略。目前睡眠保护只配合百分比模式，不处理电压维护模式。
 
-```mermaid
-flowchart LR
-    SET["设置目标电量"] --> SAVE["保存到 ~/.battery"]
-    SAVE --> LOAD["创建或刷新 launchd 任务"]
-    LOAD --> READ["读取当前电量与 SMC 状态"]
-    READ --> DECIDE{"是否达到上限"}
-    DECIDE -->|"是"| OFF["停止充电"]
-    DECIDE -->|"否"| ON["允许充电"]
-    OFF --> VERIFY["回读 SMC 验证"]
-    ON --> VERIFY
-    VERIFY --> WAIT["等待下一轮检查"]
-    WAIT --> READ
+### 手动控制充电与电源适配器
+
+| 命令 | 含义与实际效果 |
+|---|---|
+| `battery charging off` | 先停止自动维护，再立即停止给电池充电 |
+| `battery charging on` | 先停止自动维护，再立即允许电池充电 |
+| `battery adapter off` | 停止自动维护，并让 Mac 在插电时仍使用电池，即强制放电 |
+| `battery adapter on` | 取消强制放电，恢复使用外接电源供电 |
+
+`charging on/off` 控制“是否给电池充电”；`adapter on/off` 控制“是否使用外接电源”。两者含义不同。手动控制会停止当前自动维护；如果还需要继续限充，请重新执行对应的 `battery maintain ...` 命令。
+
+### 单次充电、放电与校准
+
+| 命令 | 含义与实际效果 |
+|---|---|
+| `battery charge 90` | 临时充到 90%，到达后停止充电，再尝试恢复之前的 `maintain` 设置 |
+| `battery discharge 60` | 插电状态下主动放电到 60%，完成后停止强制放电并恢复之前的设置 |
+| `battery calibrate` | 依次放电到 15%、充到 100%、保持 1 小时、放电到 80%，最后恢复限充 |
+
+主动放电和校准会产生额外的电池循环。校准过程耗时较长，不建议作为日常操作。
+
+### 电压模式
+
+```bash
+battery maintain 11.4V
+battery maintain 11.4V 0.3V
 ```
 
-核心原则是“写入后必须验证”。仅仅看到 `smc -w` 返回成功并不能证明硬件状态已经改变，因此新版流程会读取实际键值，并在不一致时返回失败。
+第一条命令默认在目标电压上下浮动 0.1V，即约 11.3V～11.5V。第二条命令把浮动范围改为 0.3V，即约 11.1V～11.7V。普通用户使用百分比模式即可。
 
-## 技术栈
+### 更新、修复与卸载
 
-| 层级 | 技术 | 用途 | 选择原因 |
-|---|---|---|---|
-| 命令行核心 | Bash | 命令解析、限充策略、安装与更新 | 与 macOS 系统工具配合直接，便于审计 |
-| 原生睡眠监听 | C、IOKit、CoreFoundation | 接收系统睡眠和唤醒通知 | 比轮询更及时，能在入睡前执行控制 |
-| 后台运行 | launchd | 重启恢复、单实例维护和睡眠监听 | macOS 原生任务管理机制 |
-| 硬件控制 | 预编译 `smc` 工具 | 读写充电、放电和 MagSafe LED 键 | 延续上游已有的底层实现 |
-| 图形界面 | Electron（上游保留） | 菜单栏界面 | 兼容原项目；本 fork 当前主要维护 CLI |
-| 验证 | Shell 测试、`plutil`、`clang` | 回归测试 plist、脚本和原生辅助程序 | 覆盖稳定性改动的关键路径 |
+| 命令 | 含义与实际效果 |
+|---|---|
+| `battery update` | 从本仓库 `main` 分支更新；版本变化后会重新启动原维护任务 |
+| `battery reinstall` | 重新执行完整安装，用于修复文件缺失、权限或安装结构问题 |
+| `battery uninstall` | 停止后台任务、恢复正常充电，然后删除程序、配置和日志 |
+| `battery --version` | 显示当前安装版本 |
+| `battery help` | 显示内置帮助；直接执行 `battery` 效果相同 |
 
-## 项目结构
+## 设置会不会互相冲突？
 
-```text
-battery/
-├── battery.sh              # 主命令行程序
-├── setup.sh                # 完整安装脚本
-├── update.sh               # 增量更新脚本
-├── src/
-│   └── battery-sleep.c     # 睡眠/唤醒监听源码
-├── dist/
-│   ├── smc                 # 预编译 SMC 工具
-│   └── battery-sleep       # 预编译睡眠监听程序
-├── tests/                  # 进程、launchd、SMC 和安装测试
-├── app/                    # 上游 Electron 菜单栏应用
-├── screenshots/            # 文档截图
-├── README.md               # 中文主文档
-└── README.en.md            # 修改前的英文文档备份
+不会。同一时间只会运行一套 `maintain` 设置。
+
+例如先执行：
+
+```bash
+battery maintain 75
 ```
 
-## 如何确认限充真的生效
+随后再执行：
 
-在新版 macOS 上，不要只看菜单栏的闪电图标。建议同时检查：
+```bash
+battery maintain 70-80
+```
+
+程序会停止旧维护进程，把保存的设置改为 `70-80`，再启动新的后台任务。最终只有 `70-80` 生效。
+
+`battery sleep on` 也不是第二套充电上限。它只负责睡眠前暂停充电、唤醒后恢复当前 `maintain` 设置。
+
+## 如何确认限充已经生效？
+
+在新版 macOS 上，不建议只根据菜单栏闪电图标判断。请同时执行：
 
 ```bash
 battery status
 pmset -g batt
 ```
 
-正常达到上限时，`battery status` 应显示 SMC charging disabled，`pmset -g batt` 应显示类似：
+达到上限后，`battery status` 应显示：
+
+```text
+smc charging disabled
+```
+
+`pmset -g batt` 应显示类似：
 
 ```text
 75%; AC attached; not charging
 ```
 
-在部分运行 macOS Tahoe 26.4 或更高版本的设备上，菜单栏仍可能显示闪电或“充电到 100%”，即使系统和 SMC 已经报告停止充电。这是系统界面状态与底层控制不同步，不能单凭图标判断失败。
+部分运行 macOS Tahoe 26.4 或更高版本的 Mac，菜单栏仍可能显示闪电或“充电到 100%”，即使底层已经停止充电。MagSafe 指示灯也可能受机型、线缆和固件影响，因此应以 `battery status` 和 `pmset` 结果为准。
 
 ## 重启与合盖后的检查
 
+先检查用户状态：
+
 ```bash
-# 限充后台进程
+battery status
+battery sleep status
+```
+
+需要进一步排查时，可以检查后台任务：
+
+```bash
+# 正常应只显示一个维护进程
 pgrep -fl '/usr/local/co.palokaj.battery/battery maintain_'
 
-# 限充任务状态
+# 限充任务
 launchctl print "gui/$(id -u)/com.battery.app" | \
   grep -E 'state =|pid =|runs =|last exit code'
 
-# 合盖保护任务状态
+# 合盖保护任务
 launchctl print "gui/$(id -u)/com.battery.sleep" | \
   grep -E 'state =|pid =|runs =|last exit code'
 
-# 最近的睡眠保护日志
+# 最近的睡眠与唤醒记录
 grep -E 'Pausing charging|Restoring battery' \
   "$HOME/.battery/battery.log" | tail -n 10
 ```
 
-正常情况下，每种任务只应有一个运行中的进程。
+## 工作原理
 
-## 更新与卸载
-
-更新到本 fork 的最新版本：
-
-```bash
-battery update
+```mermaid
+flowchart TD
+    U["用户执行 battery 命令"] --> CLI["battery.sh 保存设置"]
+    CLI --> LAUNCHD["launchd 管理后台任务"]
+    LAUNCHD --> READ["定期读取电量与充电状态"]
+    READ --> DECIDE{"是否达到设定边界"}
+    DECIDE -->|"达到上限"| OFF["停止充电"]
+    DECIDE -->|"低于下限"| ON["允许充电"]
+    OFF --> SMC["smc 写入控制键"]
+    ON --> SMC
+    SMC --> VERIFY["回读键值并确认结果"]
 ```
 
-如果安装结构损坏或缺少 `battery-sleep`：
+后台维护任务由 launchd 管理，因此可以在重新登录或重启后恢复。每次写入 SMC 后，程序会重新读取对应键值；只有读回结果一致，才认为控制已经生效。
 
-```bash
-battery reinstall
+合盖保护由内部的 `battery-sleep` 辅助程序监听系统事件：
+
+```mermaid
+flowchart LR
+    A["macOS 准备睡眠"] --> B["暂停充电并验证"]
+    B --> C["Mac 进入睡眠"]
+    C --> D["Mac 唤醒"]
+    D --> E["恢复原 maintain 设置"]
 ```
 
-卸载前，Battery 会先停止后台任务并恢复充电：
+用户不需要直接运行 `battery-sleep`，只需使用 `battery sleep on/off/status`。
 
-```bash
-battery uninstall
+## 技术组成与项目结构
+
+| 组成 | 用途 |
+|---|---|
+| Bash / `battery.sh` | CLI、限充逻辑、SMC 检测、安装与更新 |
+| launchd | 维护进程与睡眠监听任务的启动和恢复 |
+| `dist/smc` | 读取和写入 Apple Silicon SMC 键 |
+| C / IOKit / `battery-sleep` | 接收睡眠与唤醒通知 |
+| `~/.battery` | 保存维护设置、睡眠开关和日志 |
+| Shell 测试 | 验证进程管理、SMC 回读、安装和睡眠保护 |
+
+```text
+battery/
+├── battery.sh              # 主命令行程序
+├── setup.sh                # 完整安装脚本
+├── update.sh               # 增量更新脚本
+├── src/battery-sleep.c     # 睡眠/唤醒监听源码
+├── dist/                   # 预编译 smc 与 battery-sleep
+├── tests/                  # 自动化回归测试
+├── app/                    # 上游 Electron 菜单栏应用
+├── README.md               # 中文文档
+└── README.en.md            # 英文文档备份
 ```
-
-卸载会删除 `/usr/local/co.palokaj.battery`、兼容链接、sudoers 规则以及 `~/.battery` 配置和日志。
 
 ## 开发与验证
-
-修改代码后，可运行仓库内的回归测试：
 
 ```bash
 bash tests/process-management.sh
@@ -280,56 +297,23 @@ bash tests/launchd-management.sh
 bash tests/smc-write-readback.sh
 bash tests/fork-installation.sh
 bash tests/sleep-protection.sh
-```
 
-检查原生辅助程序源码和二进制：
-
-```bash
 clang -fsyntax-only -Wall -Wextra -Werror src/battery-sleep.c
 codesign --verify --verbose=2 dist/battery-sleep
 ```
 
-涉及 `battery.sh`、SMC 命令或 sudoers 权限时，请先阅读 [AGENTS.md](AGENTS.md) 中的仓库约束。
+修改 `battery.sh`、SMC 命令或安装权限前，请先阅读 [AGENTS.md](AGENTS.md)。
 
 ## 已知限制
 
-- Apple 没有公开保证这些 SMC 键长期稳定，重大系统升级后可能需要重新适配。
-- Tahoe 26.4+ 的菜单栏图标可能仍显示正在充电，应以 `battery status` 和 `pmset -g batt` 为准。
-- MagSafe 指示灯是否响应由具体机型、线缆和固件共同决定；灯光颜色不是判断限充是否生效的可靠依据。
-- 合盖保护会在整个睡眠期间暂停充电；需要合盖时补电的用户应使用 `battery sleep off`。
-- 原生睡眠辅助程序目前只提供 arm64 预编译版本，不支持 Intel Mac。
-
-## FAQ
-
-### 为什么已经有 `battery maintain 75`，还需要 `battery sleep on`？
-
-正常运行时，`maintain` 后台循环会定期检查电量；进入睡眠后，这个 Bash 循环不会继续运行。睡眠保护会在 macOS 真正睡下前主动停止充电，唤醒后再恢复 `maintain`，用于避免合盖期间充满。
-
-### `battery` 和 `battery-sleep` 是两个需要分别使用的工具吗？
-
-不是。用户只需要操作 `battery` 命令。`battery-sleep` 是内部原生辅助程序，由 `battery sleep on` 自动注册和管理，不需要手动运行。
-
-### 设置会不会在重启后失效？
-
-目标电量保存在 `~/.battery/maintain.percentage`，用户登录后 launchd 会恢复维护进程。合盖保护的开关也会保存，并在重新安装、更新或登录后恢复。
-
-### 为什么到达 75% 后图标仍写着“充电到 100%”？
-
-新版 macOS 的菜单栏显示可能没有同步 SMC 的实际充电状态。运行 `pmset -g batt`；如果显示 `AC attached; not charging`，说明已经停止充电。
-
-### 如何关闭所有限制并恢复正常充电？
-
-```bash
-battery sleep off
-battery maintain stop
-```
-
-## 贡献
-
-欢迎提交 Issue 或 Pull Request。修改前请先阅读 [AGENTS.md](AGENTS.md)，并确保相关测试通过。若改动 `battery.sh`，必须同步递增其中的 CLI 版本号。
+- Apple 未公开保证相关 SMC 键长期稳定，系统更新后可能需要继续适配；
+- 合盖保护开启后，整个睡眠期间都会暂停充电；
+- 合盖保护目前只支持百分比维护，不处理电压模式；
+- 菜单栏图标和 MagSafe 灯光不一定反映真实充电状态；
+- `battery-sleep` 当前为 arm64 程序，不支持 Intel Mac。
 
 ## License 与致谢
 
-本项目基于 [actuallymentor/battery](https://github.com/actuallymentor/battery) 修改，并继续采用 [MIT License](LICENSE)。原项目版权归 Mentor Palokaj 及相应贡献者所有。
+本仓库基于 [actuallymentor/battery](https://github.com/actuallymentor/battery) 修改，继续使用 [MIT License](LICENSE)。原项目版权归 Mentor Palokaj 及相应贡献者所有。
 
-底层预编译 `smc` 工具来源于 [hholtmann/smcFanControl](https://github.com/hholtmann/smcFanControl)。感谢上游项目、相关贡献者及测试用户。
+底层 `smc` 工具来自 [hholtmann/smcFanControl](https://github.com/hholtmann/smcFanControl)。感谢原作者及所有贡献者。
