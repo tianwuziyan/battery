@@ -99,6 +99,28 @@ battery sleep on
 
 如果希望电量更接近固定值，则使用 `battery maintain 75`。
 
+## macOS 系统设置参考
+
+下面两张截图是 macOS 自带的系统设置，用来说明系统层面的充电上限和登录项。它们不是 Battery 的操作界面，Battery 的实际充电控制仍应以 `battery status` 和 `pmset -g batt` 的结果为准。
+
+### 电池设置
+
+此处可以看到 macOS 自带的“充电上限”和“优化电池充电”选项。它们与 `battery maintain` 属于两套独立机制；如果需要明确、固定的百分比上限，应以 Battery 命令设置为准，避免同时使用两套策略造成判断混淆。
+
+<p align="center">
+  <img src="screenshots/macos-battery-settings.png" alt="macOS 电池设置中的充电上限与优化电池充电" width="760">
+</p>
+
+### 登录项与扩展
+
+安装后，系统设置的“登录项与扩展”中会显示 `battery` 和 `battery-sleep`。这表示 macOS 允许相关程序在登录时加载，是重启后恢复后台任务的系统配合项。
+
+<p align="center">
+  <img src="screenshots/macos-login-items.png" alt="macOS 登录项与扩展中的 battery 和 battery-sleep" width="760">
+</p>
+
+如果需要确认任务当前是否真的在运行，请继续使用后面的 `battery sleep status`、`battery status` 和 `launchctl print` 检查；登录项开关本身不能替代运行状态检查。
+
 ## 命令说明
 
 ### 限充与状态
@@ -285,6 +307,7 @@ battery/
 ├── dist/                   # 预编译 smc 与 battery-sleep
 ├── tests/                  # 自动化回归测试
 ├── app/                    # 上游 Electron 菜单栏应用
+├── screenshots/            # README 使用的界面截图
 ├── README.md               # 中文文档
 └── README.en.md            # 英文文档备份
 ```
