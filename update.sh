@@ -12,6 +12,9 @@ trap 'exit 130' INT
 
 # Define the installation directory for the battery background executables
 binfolder="/usr/local/co.palokaj.battery"
+github_user="tianwuziyan"
+github_branch="main"
+github_raw="https://raw.githubusercontent.com/$github_user/battery/$github_branch"
 
 function is_launched_by_gui_app() {
 	# Determine the process group ID (PGID) of the current process
@@ -38,7 +41,7 @@ fi
 # more comprehensive checks in 'battery update' in order to trigger 'battery reinstall' when needed.
 if [[ $EUID -ne 0 && ! -x "$binfolder/battery" ]]; then
 	echo -e "💡 This battery update requires a full reinstall...\n"
-	curl -sS "https://raw.githubusercontent.com/actuallymentor/battery/main/setup.sh" | bash
+	curl -sS "$github_raw/setup.sh" | bash
 	$binfolder/battery maintain recover
 	exit 0
 fi
@@ -53,15 +56,21 @@ updatefolder="$tempfolder/battery"
 mkdir -p $updatefolder
 
 echo "[ 2 ] Downloading the latest battery version"
-if ! curl -sS -o $updatefolder/battery.sh https://raw.githubusercontent.com/actuallymentor/battery/main/battery.sh; then
+if ! curl -sS -o $updatefolder/battery.sh "$github_raw/battery.sh"; then
 	err=$?
 	echo -e "\n❌ Failed to download the update.\n"
+	exit $err
+fi
+if ! curl -sS -o $updatefolder/battery-sleep "$github_raw/dist/battery-sleep"; then
+	err=$?
+	echo -e "\n❌ Failed to download the sleep protection helper.\n"
 	exit $err
 fi
 
 echo "[ 3 ] Writing script to $binfolder/battery"
 sudo install -d -m 755 -o root -g wheel "$binfolder"
 sudo install -m 755 -o root -g wheel "$updatefolder/battery.sh" "$binfolder/battery"
+sudo install -m 755 -o root -g wheel "$updatefolder/battery-sleep" "$binfolder/battery-sleep"
 
 echo "[ 4 ] Remove temporary folder"
 rm -rf "$tempfolder";

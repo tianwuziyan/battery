@@ -45,11 +45,13 @@ if [[ "$calling_user" == "root" ]]; then
 fi
 
 # Set variables
+github_user=tianwuziyan
+github_branch=main
 binfolder=/usr/local/co.palokaj.battery
 configfolder=/Users/$calling_user/.battery
-pidfile=$configfolder/battery.pid
 logfile=$configfolder/battery.log
 launch_agent_plist=/Users/$calling_user/Library/LaunchAgents/battery.plist
+sleep_agent_plist=/Users/$calling_user/Library/LaunchAgents/battery-sleep.plist
 path_configfile=/etc/paths.d/50-battery
 
 # Ask for sudo once, in most systems this will cache the permissions for a bit
@@ -67,15 +69,34 @@ trap cleanup EXIT
 
 echo "[  3 ] Downloading latest version of battery CLI"
 # Note: github names zips by <reponame>-<branchname>.replace( '/', '-' )
-update_branch="main"
+update_branch="$github_branch"
 in_zip_folder_name="battery-$update_branch"
 batteryfolder="$tempfolder/battery"
 rm -rf $batteryfolder
 mkdir -p $batteryfolder
-curl -sSL -o $batteryfolder/repo.zip "https://github.com/actuallymentor/battery/archive/refs/heads/$update_branch.zip"
+curl -sSL -o $batteryfolder/repo.zip "https://github.com/$github_user/battery/archive/refs/heads/$update_branch.zip"
 unzip -qq $batteryfolder/repo.zip -d $batteryfolder
 cp -r $batteryfolder/$in_zip_folder_name/* $batteryfolder
 rm $batteryfolder/repo.zip
+
+echo "[ 3b ] Stop existing maintenance before replacing its executable"
+if [[ -x "$binfolder/battery" && -x "$binfolder/smc" ]]; then
+	# Run the already-installed, root-owned CLI as the login user. The maintenance
+	# commands reject root, and the freshly downloaded script is not trusted yet.
+	sudo -u "$calling_user" -H "$binfolder/battery" maintain stop || {
+		echo "❌ Failed to stop existing battery maintenance"
+		exit 1
+	}
+else
+	/bin/launchctl bootout "gui/$(id -u "$calling_user")/com.battery.app" >/dev/null 2>&1 || true
+fi
+/bin/launchctl bootout "gui/$(id -u "$calling_user")/com.battery.app" >/dev/null 2>&1 || true
+/bin/launchctl bootout "gui/$(id -u "$calling_user")/com.battery.sleep" >/dev/null 2>&1 || true
+/usr/bin/pkill -f '^/bin/bash /usr/local/co\.palokaj\.battery/battery maintain_(synchronous|voltage_synchronous)' >/dev/null 2>&1 || true
+if /usr/bin/pgrep -f '^/bin/bash /usr/local/co\.palokaj\.battery/battery maintain_(synchronous|voltage_synchronous)' >/dev/null 2>&1; then
+	echo "❌ Existing battery maintenance process did not stop"
+	exit 1
+fi
 
 echo "[  4 ] Make sure $binfolder is recreated and owned by root"
 sudo rm -rf "$binfolder" # start with an empty $binfolder and ensure there is no symlink or file at the path
@@ -86,6 +107,9 @@ sudo install -m 755 -o root -g wheel "$batteryfolder/dist/smc" "$binfolder/smc"
 
 echo "[  6 ] Install battery script into $binfolder"
 sudo install -m 755 -o root -g wheel "$batteryfolder/battery.sh" "$binfolder/battery"
+
+echo "[ 6b ] Install sleep protection helper into $binfolder"
+sudo install -m 755 -o root -g wheel "$batteryfolder/dist/battery-sleep" "$binfolder/battery-sleep"
 
 echo "[  7 ] Make sure the PATH environment variable includes '$binfolder'"
 if ! grep -qF "$binfolder" $path_configfile 2>/dev/null; then
@@ -111,18 +135,25 @@ touch $logfile
 sudo chown -h $calling_user $logfile
 sudo chmod -h 644 $logfile
 
-touch $pidfile
-sudo chown -h $calling_user $pidfile
-sudo chmod -h 644 $pidfile
-
 # Fix permissions for 'create_daemon' action
 echo "[  9 ] Fix ownership and permissions for $(dirname "$launch_agent_plist")"
 sudo chown -h $calling_user "$(dirname "$launch_agent_plist")"
 sudo chmod -h 755 "$(dirname "$launch_agent_plist")"
 sudo chown -hf $calling_user "$launch_agent_plist" 2>/dev/null
+sudo chown -hf $calling_user "$sleep_agent_plist" 2>/dev/null
 
 echo "[ 10 ] Setup visudo configuration"
 sudo $binfolder/battery visudo
+
+sudo -u "$calling_user" -H "$binfolder/battery" sleep recover
+
+if [[ -s "$configfolder/maintain.percentage" || -s "$configfolder/maintain.voltage" ]]; then
+	echo "[ 10b ] Restore saved battery maintenance"
+	sudo -u "$calling_user" -H "$binfolder/battery" maintain recover || {
+		echo "❌ Failed to restore saved battery maintenance"
+		exit 1
+	}
+fi
 
 echo "[ 11 ] Remove temp folder $tempfolder"
 rm -rf $tempfolder
